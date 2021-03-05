@@ -135,10 +135,21 @@ def generate_round_keys(key_in_hex):
         for j in range(3):
             w_key.append(xor(w_key[i * 4 + j], w_key[i * 4 + j - 3]))
 
-    for i in range(0, len(w_key), 4):
-        print(w_key[i:i + 4])
-
     return w_key
+
+
+def matrix_multiplication(mixer, state):
+    rows, cols = (len(mixer[0]), len(state))
+    result = [[BitVector(hexstring='00') for i in range(cols)] for j in range(rows)]
+
+    for i in range(len(mixer)):
+        for j in range(len(state)):
+            for k in range(len(state[j])):
+                # print('now multiplying ', mat1[i][k].get_bitvector_in_hex(), mat2_in_cols[j][k])
+                result[j][i] ^= mixer[i][k].gf_multiply_modular(BitVector(hexstring=state[j][k]), AES_modulus, 8)
+            result[j][i] = result[j][i].get_bitvector_in_hex()
+            # print('found: ', result[j][i])
+    return result
 
 
 key_len = 16
@@ -158,7 +169,8 @@ else:
 key_in_hex = BitVector(textstring=key).get_bitvector_in_hex()
 
 w = generate_round_keys(key_in_hex)
-print(w)
+for i in range(0, len(w), 4):
+    print(w[i:i+4])
 
 text = "Two One Nine Two"
 # text = input("Enter plain text:")
@@ -167,48 +179,40 @@ input_in_hex = BitVector(textstring=text).get_bitvector_in_hex()
 
 # work needed
 input_matrix = make_matrix(input_in_hex)
-print(input_matrix)
+print('input_matrix:', input_matrix)
 
 # round 0
 state = []
 for i in range(len(input_matrix)):
     state.append(xor(w[i], input_matrix[i]))
-print('after round 0\t', state)
-
-# round 1
-# byte substitute
-for state_col in state:
-    for j in range(len(state_col)):
-        state_col[j] = byte_substitute(state_col[j])
-print('after byte substitute:\t', state)
-
-# shift row
-for i in range(1, 4):
-    for k in range(i):
-        for j in range(3):
-            state[j][i], state[j + 1][i] = state[j + 1][i], state[j][i]
-print('after row shift:\t', state)
+print('round 0:\t', state)
 
 
-# mix column
-def matrix_multiplication(mat1, mat2_in_cols):
-    rows, cols = (len(mat1[0]), len(mat2_in_cols))
-    result = [[BitVector(hexstring='00') for i in range(cols)] for j in range(rows)]
+for r in range(1, total_rounds):
 
-    for i in range(len(mat1)):
-        for j in range(len(mat2_in_cols)):
-            for k in range(len(mat2_in_cols[j])):
-                # print('now multiplying ', mat1[i][k].get_bitvector_in_hex(), mat2_in_cols[j][k])
-                result[j][i] ^= mat1[i][k].gf_multiply_modular(BitVector(hexstring=mat2_in_cols[j][k]), AES_modulus, 8)
-            result[j][i] = result[j][i].get_bitvector_in_hex()
-            # print('found: ', result[j][i])
-    return result
+    # byte substitute
+    for state_col in state:
+        for j in range(len(state_col)):
+            state_col[j] = byte_substitute(state_col[j])
+    print('byte subs:\t', state)
+
+    # shift row
+    for i in range(1, 4):
+        for k in range(i):
+            for j in range(3):
+                state[j][i], state[j + 1][i] = state[j + 1][i], state[j][i]
+    print('row shft:\t', state)
+
+    # mix columns
+    if r != total_rounds-1:
+        state = matrix_multiplication(Mixer, state)
+        print('mix cols:\t', state)
+
+    # add round key
+    for i in range(len(state)):
+        state[i] = xor(w[i + (4 * r)], state[i])
+    print('round', r, ':\t', state)
+
+print('cypher text: ', state)
 
 
-state = matrix_multiplication(Mixer, state)
-print('after mix columns:\t', state)
-
-# add round key
-for i in range(len(state)):
-    state[i] = xor(w[i+4], state[i])
-print('after round 1\t', state)
