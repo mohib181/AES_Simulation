@@ -70,22 +70,13 @@ InvMixer = [
 b = BitVector(hexstring="4E")
 int_val = b.intValue()
 s = Sbox[int_val]
-print('int_val: ', int_val, type(int_val), 's: ', s, type(s))
 s = BitVector(intVal=s, size=8)
-print(s.get_bitvector_in_hex(), type(s.get_bitvector_in_hex()))
 
 AES_modulus = BitVector(bitstring='100011011')
-print('AES_: ', AES_modulus, type(AES_modulus))
 
 bv1 = BitVector(hexstring="02")
 bv2 = BitVector(hexstring="63")
 bv3 = bv1.gf_multiply_modular(bv2, AES_modulus, 8)
-print('bv1: ', bv1, type(bv1))
+print('bv1: ', bv1)
 print('bv2: ', bv2)
-print('bv3: ', bv3, type(bv3))
-
-
-print(Sbox[0])
-print(Sbox[1])
-print(Sbox[8])
-print(Sbox[1*8+1])
+print('bv3: ', bv3)

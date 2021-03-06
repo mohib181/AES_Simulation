@@ -3,6 +3,7 @@
 # Press Shift+F10 to execute it or replace it with your code.
 # Press Double Shift to search everywhere for classes, files, tool windows, actions, and settings.
 
+from time import time
 from BitVector import *
 
 Sbox = (
@@ -83,6 +84,28 @@ def make_matrix(data_in_hex):
     return result
 
 
+def make_matrix_v2(data_in_hex):
+    chunk_size = 32
+    chunks = [(data_in_hex[k:k + chunk_size]) for k in range(0, len(data_in_hex), chunk_size)]
+    chunks[-1] = chunks[-1] + '20'*((chunk_size - len(chunks[-1])) // 2)
+
+    blocks = []
+    for chunk in chunks:
+        word_size = 8
+        words = [(chunk[k:k + word_size]) for k in range(0, len(chunk), word_size)]
+
+        print(words, '\nlen:', len(words))
+        word_size = 2
+        result = []
+        for word in words:
+            result.append([(word[k:k + word_size]) for k in range(0, len(word), word_size)])
+        print('result', result)
+        blocks.append(result)
+
+    print('blocks', blocks)
+    return blocks
+
+
 def xor(w1, w2):
     result = []
     for i in range(len(w1)):
@@ -106,6 +129,13 @@ def generate_round_constant(i, prev_round_constant):
 
 
 def byte_substitute(byte_value):
+    b = BitVector(hexstring=byte_value)
+    s = InvSbox[b.intValue()]
+    s = BitVector(intVal=s, size=8)
+    return s.get_bitvector_in_hex()
+
+
+def byte_substitute_inverse(byte_value):
     b = BitVector(hexstring=byte_value)
     s = Sbox[b.intValue()]
     s = BitVector(intVal=s, size=8)
@@ -168,12 +198,27 @@ else:
 
 key_in_hex = BitVector(textstring=key).get_bitvector_in_hex()
 
+start = time()
 w = generate_round_keys(key_in_hex)
-for i in range(0, len(w), 4):
-    print(w[i:i+4])
+end = time()
+print('key generate:', end-start)
+# for i in range(0, len(w), 4):
+#    print(w[i:i+4])
+
+text = "Two One Nine Two Three"
+# text = input("Enter plain text:")
+print('plain text:', text)
+input_in_hex = BitVector(textstring=text).get_bitvector_in_hex()
+# print(input_in_hex, len(input_in_hex), len(input_in_hex) % 32)
+
+# work needed
+input_matrix = make_matrix_v2(input_in_hex)
+print('input_matrix:', input_matrix)
+
 
 text = "Two One Nine Two"
 # text = input("Enter plain text:")
+print('plain text:', text)
 input_in_hex = BitVector(textstring=text).get_bitvector_in_hex()
 # print(input_in_hex, len(input_in_hex), len(input_in_hex) % 32)
 
@@ -181,38 +226,104 @@ input_in_hex = BitVector(textstring=text).get_bitvector_in_hex()
 input_matrix = make_matrix(input_in_hex)
 print('input_matrix:', input_matrix)
 
+start = time()
+
 # round 0
 state = []
 for i in range(len(input_matrix)):
     state.append(xor(w[i], input_matrix[i]))
-print('round 0:\t', state)
+# print('round 0:\t', state)
 
-
+# round 1-10
 for r in range(1, total_rounds):
 
     # byte substitute
     for state_col in state:
         for j in range(len(state_col)):
             state_col[j] = byte_substitute(state_col[j])
-    print('byte subs:\t', state)
+    # print('byte subs:\t', state)
 
     # shift row
     for i in range(1, 4):
         for k in range(i):
             for j in range(3):
                 state[j][i], state[j + 1][i] = state[j + 1][i], state[j][i]
-    print('row shft:\t', state)
+    # print('row shft:\t', state)
 
     # mix columns
     if r != total_rounds-1:
         state = matrix_multiplication(Mixer, state)
-        print('mix cols:\t', state)
+        # print('mix cols:\t', state)
 
     # add round key
     for i in range(len(state)):
         state[i] = xor(w[i + (4 * r)], state[i])
-    print('round', r, ':\t', state)
+    # print('round', r, ':\t', state)
 
+end = time()
 print('cypher text: ', state)
+print('time', end-start)
+
+
+start = time()
+# decryption
+# round 0
+# add round key
+for i in range(len(state)):
+    # print('adding w', i + (4 * (total_rounds-1)))
+    state[i] = xor(w[i + (4 * (total_rounds-1))], state[i])
+# print('round 0:\t', state)
+# round 1 - 10
+# inverse shift
+# inverse sub byte
+# add round
+# inverse mix col
+
+# round 1-10
+for r in range(total_rounds-1, 0, -1):
+
+    # inverse shift row
+    for i in range(1, 4):
+        for k in range(i):
+            for j in range(3, 0, -1):
+                state[j][i], state[j - 1][i] = state[j - 1][i], state[j][i]
+    # print('inverse row shft:\t', state)
+
+    # inverse byte substitute
+    for state_col in state:
+        for j in range(len(state_col)):
+            state_col[j] = byte_substitute_inverse(state_col[j])
+    # print('inverse byte subs:\t', state)
+
+    # add round key
+    for i in range(len(state)):
+        # print('adding w', i + (4 * (r-1)))
+        state[i] = xor(w[i + (4 * (r-1))], state[i])
+
+    # inverse mix columns
+    if r != 1:
+        state = matrix_multiplication(InvMixer, state)
+        # print('inverse mix cols:\t', state)
+
+    # print('round', (total_rounds-r), ':\t', state)
+
+print('plain text in hex: ', state)
+
+
+def hex_to_ascii(text_in_hex):
+    t = []
+    for w in text_in_hex:
+        for a in w:
+            bv = BitVector(hexstring=a)
+            t.append(chr(bv.intValue()))
+    return ''.join(t)
+
+
+plain_text = hex_to_ascii(state)
+end = time()
+
+print('plain text:', plain_text)
+print('time:', end-start)
+
 
 
