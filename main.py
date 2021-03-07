@@ -71,48 +71,34 @@ def make_matrix(data_in_hex, chunk_size):
         byte_size = 2
         result = []
         for word in words:
-            result.append([(word[k:k + byte_size]) for k in range(0, len(word), byte_size)])
+            result.append([BitVector(hexstring=(word[k:k + byte_size])) for k in range(0, len(word), byte_size)])
         # print('result', result)
         blocks.append(result)
 
-    # print('blocks', blocks)
+    # print_matrix(blocks)
     return blocks
 
 
-def xor(w1, w2):
-    result = []
-    for i in range(len(w1)):
-        t = BitVector(hexstring=w1[i]) ^ BitVector(hexstring=w2[i])
-        t = t.get_bitvector_in_hex()
-        result.append(t)
+def key_scheduling(key, key_len):
+    if len(key) > key_len:
+        key = key[:key_len]
+    else:
+        key = key + '0' * (key_len - len(key))
+    print('key:', key, 'len:', len(key))
 
-    return result
+    key_in_hex = BitVector(textstring=key).get_bitvector_in_hex()
+
+    return generate_round_keys(key_in_hex)
 
 
 def generate_round_constant(i, prev_round_constant):
-    rc = ['00', '00', '00', '00']
+    rc = [BitVector(hexstring='00'), BitVector(hexstring='00'), BitVector(hexstring='00'), BitVector(hexstring='00')]
     if i == 1:
-        rc[0] = '01'
+        rc[0] = BitVector(hexstring='01')
     else:
-        bv1 = BitVector(hexstring="02")
-        bv2 = BitVector(hexstring=prev_round_constant[0])
-        bv3 = bv1.gf_multiply_modular(bv2, AES_modulus, 8)
-        rc[0] = bv3.get_bitvector_in_hex()
+        rc[0] = prev_round_constant[0].gf_multiply_modular(BitVector(hexstring='02'), AES_modulus, 8)
+
     return rc
-
-
-def byte_substitute(byte_value):
-    b = BitVector(hexstring=byte_value)
-    s = Sbox[b.intValue()]
-    s = BitVector(intVal=s, size=8)
-    return s.get_bitvector_in_hex()
-
-
-def byte_substitute_inverse(byte_value):
-    b = BitVector(hexstring=byte_value)
-    s = InvSbox[b.intValue()]
-    s = BitVector(intVal=s, size=8)
-    return s.get_bitvector_in_hex()
 
 
 def generate_g(root_word, round_no, current_rc):
@@ -122,24 +108,34 @@ def generate_g(root_word, round_no, current_rc):
         g.append(byte_substitute(byte_value))
 
     rc = generate_round_constant(round_no, current_rc)
-    g = xor(g, rc)
+    g = [i ^ j for i, j in zip(g, rc)]
 
     return g, rc
 
 
 def generate_round_keys(key_in_hex):
-    w_key = make_matrix(key_in_hex, chunk_size=32)
+    w_key = make_matrix(key_in_hex, chunk_size=len(key_in_hex))
     w_key = w_key[0]
     # print(w_key)
 
     round_constant = []
     for i in range(1, total_rounds):
         g, round_constant = generate_g(w_key[i * 4 - 1], i, round_constant)
-        w_key.append(xor(g, w_key[(i - 1) * 4]))
+        w_key.append([x ^ y for x, y in zip(g, w_key[(i - 1) * 4])])
         for j in range(3):
-            w_key.append(xor(w_key[i * 4 + j], w_key[i * 4 + j - 3]))
+            w_key.append([x ^ y for x, y in zip(w_key[i * 4 + j], w_key[i * 4 + j - 3])])
 
     return w_key
+
+
+def byte_substitute(byte_value):
+    s = Sbox[byte_value.intValue()]
+    return BitVector(intVal=s, size=8)
+
+
+def byte_substitute_inverse(byte_value):
+    s = InvSbox[byte_value.intValue()]
+    return BitVector(intVal=s, size=8)
 
 
 def matrix_multiplication(mixer, state):
@@ -149,10 +145,10 @@ def matrix_multiplication(mixer, state):
     for i in range(len(mixer)):
         for j in range(len(state)):
             for k in range(len(state[j])):
-                # print('now multiplying ', mat1[i][k].get_bitvector_in_hex(), mat2_in_cols[j][k])
-                result[j][i] ^= mixer[i][k].gf_multiply_modular(BitVector(hexstring=state[j][k]), AES_modulus, 8)
-            result[j][i] = result[j][i].get_bitvector_in_hex()
-            # print('found: ', result[j][i])
+                # print('multiplying ', mat1[i][k].get_bitvector_in_hex(), mat2_in_cols[j][k].get_bitvector_in_hex())
+                result[j][i] ^= mixer[i][k].gf_multiply_modular(state[j][k], AES_modulus, 8)
+            # print('found: ', result[j][i].get_bitvector_in_hex())
+
     return result
 
 
@@ -160,7 +156,7 @@ def encrypt(block):
     # round 0
     state = []
     for i in range(len(block)):
-        state.append(xor(w[i], block[i]))
+        state.append([x ^ y for x, y in zip(w[i], block[i])])
     # print('round 0:\t', state)
 
     # round 1-10
@@ -186,7 +182,7 @@ def encrypt(block):
 
         # add round key
         for i in range(len(state)):
-            state[i] = xor(w[i + (4 * r)], state[i])
+            state[i] = [x ^ y for x, y in zip(state[i], w[i + (4 * r)])]
         # print('round', r, ':\t', state)
 
     return state
@@ -195,7 +191,7 @@ def encrypt(block):
 def decrypt(block):
     state = []
     for i in range(len(block)):
-        state.append(xor(w[i + (4 * (total_rounds - 1))], block[i]))
+        state.append([x ^ y for x, y in zip(block[i], w[i + (4 * (total_rounds - 1))])])
     # print('round 0:\t', state)
 
     # round 1-10
@@ -217,7 +213,7 @@ def decrypt(block):
         # add round key
         for i in range(len(state)):
             # print('adding w', i + (4 * (r-1)))
-            state[i] = xor(w[i + (4 * (r - 1))], state[i])
+            state[i] = [x ^ y for x, y in zip(state[i], w[i + (4 * (r - 1))])]
 
         # inverse mix columns
         if r != 1:
@@ -232,41 +228,45 @@ def print_matrix(blocks):
     for block in blocks:
         for word in block:
             for byte in word:
-                print((byte))
+                print(byte.get_bitvector_in_hex(), end=' ')
+    print()
+
+
+def hex_to_ascii(text_in_hex):
+    text = []
+    for block in text_in_hex:
+        for word in block:
+            for byte in word:
+                text.append(chr(byte.intValue()))
+    return ''.join(text)
 
 
 key_len = 16
 total_rounds = 11
+chunk_size = key_len * 2
 AES_modulus = BitVector(bitstring='100011011')
 
 # key = input("Enter your key(16 characters at most):")
 key = 'Thats my Kung Fu'
 # print('len', len(key))
 
-if len(key) > key_len:
-    key = key[:key_len]
-else:
-    key = key + '0' * (key_len - len(key))
-print('key:', key, 'len:', len(key))
-
-key_in_hex = BitVector(textstring=key).get_bitvector_in_hex()
-
 start = time()
-w = generate_round_keys(key_in_hex)
+w = key_scheduling(key, key_len)
 end = time()
-print('key generate:', end-start)
-# for i in range(0, len(w), 4):
-#    print(w[i:i+4])
+
+for i in range(0, len(w), 4):
+    print_matrix([w[i:i+4]])
+
+print('key scheduling:', end-start)
 
 text = "Two One Nine Two"
 # text = input("Enter plain text:")
 print('plain text:', text)
 input_in_hex = BitVector(textstring=text).get_bitvector_in_hex()
-# print(input_in_hex, len(input_in_hex), len(input_in_hex) % 32)
-
 blocks = make_matrix(input_in_hex, chunk_size=32)
-print('input:', blocks)
 
+print('input:')
+print_matrix(blocks)
 
 cypher_text = []
 
@@ -275,29 +275,19 @@ for block in blocks:
     cypher_text.append(encrypt(block))
 end = time()
 
-print('cypher text:', cypher_text)
+print('cypher text:')
+print_matrix(cypher_text)
 print('encryption time:', end-start)
 
-
-def hex_to_ascii(text_in_hex):
-    t = []
-    for w in text_in_hex:
-        for a in w:
-            bv = BitVector(hexstring=a)
-            t.append(chr(bv.intValue()))
-    return ''.join(t)
-
-
 start = time()
-
-plain_text_in_hex = []
+retrieved_text_in_hex = []
 for block in cypher_text:
-    plain_text_in_hex.append(decrypt(block))
+    retrieved_text_in_hex.append(decrypt(block))
 
-plain_text = ''
-for block in plain_text_in_hex:
-    plain_text += hex_to_ascii(block)
-
+retrieved_text = hex_to_ascii(retrieved_text_in_hex)
 end = time()
-print('retrieved text:', plain_text)
+
+print('retrieved text:')
+print_matrix(retrieved_text_in_hex)
+print(retrieved_text)
 print('decryption time:', end-start)
