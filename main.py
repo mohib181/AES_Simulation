@@ -1,8 +1,3 @@
-# This is a sample Python script.
-
-# Press Shift+F10 to execute it or replace it with your code.
-# Press Double Shift to search everywhere for classes, files, tool windows, actions, and settings.
-
 from time import time
 from BitVector import *
 
@@ -65,17 +60,17 @@ def make_matrix(data_in_hex, chunk_size):
 
     blocks = []
     for chunk in chunks:
-        word_size = 8
+        word_size = 8               # word contains 4 bytes
         words = [(chunk[k:k + word_size]) for k in range(0, len(chunk), word_size)]
 
-        byte_size = 2
+        byte_size = 2               # byte contains 8 bits
         result = []
         for word in words:
             result.append([BitVector(hexstring=(word[k:k + byte_size])) for k in range(0, len(word), byte_size)])
-        # print('result', result)
+        # print(result)
         blocks.append(result)
 
-    # print_matrix(blocks)
+    # print(blocks, '\n', 'len:', len(blocks[0]))
     return blocks
 
 
@@ -116,7 +111,6 @@ def generate_g(root_word, round_no, current_rc):
 def generate_round_keys(key_in_hex):
     w_key = make_matrix(key_in_hex, chunk_size=len(key_in_hex))
     w_key = w_key[0]
-    # print(w_key)
 
     round_constant = []
     for i in range(1, total_rounds):
@@ -140,12 +134,12 @@ def byte_substitute_inverse(byte_value):
 
 def matrix_multiplication(mixer, state):
     rows, cols = (len(mixer[0]), len(state))
-    result = [[BitVector(hexstring='00') for i in range(cols)] for j in range(rows)]
+    result = [[BitVector(hexstring='00') for i in range(rows)] for j in range(cols)]
 
     for i in range(len(mixer)):
         for j in range(len(state)):
             for k in range(len(state[j])):
-                # print('multiplying ', mat1[i][k].get_bitvector_in_hex(), mat2_in_cols[j][k].get_bitvector_in_hex())
+                # print('multiplying ', mixer[i][k].get_bitvector_in_hex(), state[j][k].get_bitvector_in_hex(), i, j, k)
                 result[j][i] ^= mixer[i][k].gf_multiply_modular(state[j][k], AES_modulus, 8)
             # print('found: ', result[j][i].get_bitvector_in_hex())
 
@@ -157,7 +151,7 @@ def encrypt(block):
     state = []
     for i in range(len(block)):
         state.append([x ^ y for x, y in zip(w[i], block[i])])
-    # print('round 0:\t', state)
+    # print('round 0:', print_matrix(state))
 
     # round 1-10
     for r in range(1, total_rounds):
@@ -166,24 +160,24 @@ def encrypt(block):
         for state_col in state:
             for j in range(len(state_col)):
                 state_col[j] = byte_substitute(state_col[j])
-        # print('byte subs:\t', state)
+        # print('byte sub:', print_matrix(state))
 
         # shift row
-        for i in range(1, 4):
+        for i in range(1, len(state[0])):
             for k in range(i):
-                for j in range(3):
+                for j in range(len(state)-1):
                     state[j][i], state[j + 1][i] = state[j + 1][i], state[j][i]
-        # print('row shift:\t', state)
+        # print(row shift', print_matrix(state))
 
         # mix columns
         if r != total_rounds - 1:
             state = matrix_multiplication(Mixer, state)
-            # print('mix cols:\t', state)
+            # print('mix column', print_matrix(state))
 
         # add round key
         for i in range(len(state)):
             state[i] = [x ^ y for x, y in zip(state[i], w[i + (4 * r)])]
-        # print('round', r, ':\t', state)
+        # print('round', r, print_matrix(state))
 
     return state
 
@@ -192,23 +186,23 @@ def decrypt(block):
     state = []
     for i in range(len(block)):
         state.append([x ^ y for x, y in zip(block[i], w[i + (4 * (total_rounds - 1))])])
-    # print('round 0:\t', state)
+    # print('round 0', print_matrix(state))
 
     # round 1-10
     for r in range(total_rounds - 1, 0, -1):
 
         # inverse shift row
-        for i in range(1, 4):
+        for i in range(1, len(state[0])):
             for k in range(i):
-                for j in range(3, 0, -1):
+                for j in range(len(state)-1, 0, -1):
                     state[j][i], state[j - 1][i] = state[j - 1][i], state[j][i]
-        # print('inverse row shift:\t', state)
+        # print('inverse shift row', print_matrix(state))
 
         # inverse byte substitute
         for state_col in state:
             for j in range(len(state_col)):
                 state_col[j] = byte_substitute_inverse(state_col[j])
-        # print('inverse byte subs:\t', state)
+        # print('inverse byte shift', print_matrix(state))
 
         # add round key
         for i in range(len(state)):
@@ -218,27 +212,27 @@ def decrypt(block):
         # inverse mix columns
         if r != 1:
             state = matrix_multiplication(InvMixer, state)
-            # print('inverse mix cols:\t', state)
+            # print('inverse mix column', print_matrix(state))
 
-        # print('round', (total_rounds-r), ':\t', state)
+        # print('round', r, print_matrix(state))
     return state
 
 
-def print_matrix(blocks):
-    for block in blocks:
-        for word in block:
-            for byte in word:
-                print(byte.get_bitvector_in_hex(), end=' ')
+def print_matrix(block):
+    for word in block:
+        for byte in word:
+            print(byte.get_bitvector_in_hex(), end=' ')
     print()
+    return ''
 
 
-def hex_to_ascii(text_in_hex):
-    text = []
-    for block in text_in_hex:
+def matrix_to_hex_data(data_in_hex):
+    data = []
+    for block in data_in_hex:
         for word in block:
             for byte in word:
-                text.append(chr(byte.intValue()))
-    return ''.join(text)
+                data.append(byte.get_bitvector_in_hex())
+    return ''.join(data)
 
 
 key_len = 16
@@ -246,27 +240,33 @@ total_rounds = 11
 chunk_size = key_len * 2
 AES_modulus = BitVector(bitstring='100011011')
 
-# key = input("Enter your key(16 characters at most):")
-key = 'Thats my Kung Fu'
-# print('len', len(key))
+input_prompt = f'Enter your key({key_len} characters at most):'
+# key = input(input_prompt)
+key = 'Thats My Kung Fu'
 
 start = time()
 w = key_scheduling(key, key_len)
 end = time()
 
-for i in range(0, len(w), 4):
-    print_matrix([w[i:i+4]])
+# print('generated keys:')
+# for i in range(0, len(w), 4):
+#   print_matrix(w[i:i+4])
 
 print('key scheduling:', end-start)
 
-text = "Two One Nine Two"
-# text = input("Enter plain text:")
-print('plain text:', text)
-input_in_hex = BitVector(textstring=text).get_bitvector_in_hex()
-blocks = make_matrix(input_in_hex, chunk_size=32)
 
-print('input:')
-print_matrix(blocks)
+# text = input("Enter plain text:")
+# text = "Two One Nine Two"
+# input_in_hex = BitVector(textstring=text).get_bitvector_in_hex()
+# print('input_in_hex:', input_in_hex)
+
+f = open('difficult.jpg', 'rb')
+file_data = f.read()
+input_in_hex = file_data.hex()
+f.close()
+
+blocks = make_matrix(input_in_hex, chunk_size)
+
 
 cypher_text = []
 
@@ -275,8 +275,7 @@ for block in blocks:
     cypher_text.append(encrypt(block))
 end = time()
 
-print('cypher text:')
-print_matrix(cypher_text)
+# print('cypher text:', matrix_to_hex_data(cypher_text))
 print('encryption time:', end-start)
 
 start = time()
@@ -284,10 +283,14 @@ retrieved_text_in_hex = []
 for block in cypher_text:
     retrieved_text_in_hex.append(decrypt(block))
 
-retrieved_text = hex_to_ascii(retrieved_text_in_hex)
+retrieved_hex = matrix_to_hex_data(retrieved_text_in_hex)
+byte_from_hex = bytes.fromhex(retrieved_hex)
 end = time()
 
-print('retrieved text:')
-print_matrix(retrieved_text_in_hex)
-print(retrieved_text)
+# print('retrieved text:', retrieved_hex)
+# print(byte_from_hex.decode('ASCII'))
 print('decryption time:', end-start)
+
+f = open('decrypted.png', 'wb')
+f.write(byte_from_hex)
+f.close()
