@@ -56,14 +56,14 @@ InvMixer = [
 
 def make_matrix(data_in_hex, chunk_size):
     chunks = [(data_in_hex[k:k + chunk_size]) for k in range(0, len(data_in_hex), chunk_size)]
-    chunks[-1] = chunks[-1] + BitVector(textstring=' ').get_bitvector_in_hex()*((chunk_size - len(chunks[-1])) // 2)
+    chunks[-1] = chunks[-1] + BitVector(textstring=' ').get_bitvector_in_hex() * ((chunk_size - len(chunks[-1])) // 2)
 
     blocks = []
     for chunk in chunks:
-        word_size = 8               # word contains 4 bytes
+        word_size = 8  # word contains 4 bytes
         words = [(chunk[k:k + word_size]) for k in range(0, len(chunk), word_size)]
 
-        byte_size = 2               # byte contains 8 bits
+        byte_size = 2  # byte contains 8 bits
         result = []
         for word in words:
             result.append([BitVector(hexstring=(word[k:k + byte_size])) for k in range(0, len(word), byte_size)])
@@ -165,7 +165,7 @@ def encrypt(block):
         # shift row
         for i in range(1, len(state[0])):
             for k in range(i):
-                for j in range(len(state)-1):
+                for j in range(len(state) - 1):
                     state[j][i], state[j + 1][i] = state[j + 1][i], state[j][i]
         # print(row shift', print_matrix(state))
 
@@ -194,7 +194,7 @@ def decrypt(block):
         # inverse shift row
         for i in range(1, len(state[0])):
             for k in range(i):
-                for j in range(len(state)-1, 0, -1):
+                for j in range(len(state) - 1, 0, -1):
                     state[j][i], state[j - 1][i] = state[j - 1][i], state[j][i]
         # print('inverse shift row', print_matrix(state))
 
@@ -235,62 +235,101 @@ def matrix_to_hex_data(data_in_hex):
     return ''.join(data)
 
 
-key_len = 16
-total_rounds = 11
-chunk_size = key_len * 2
-AES_modulus = BitVector(bitstring='100011011')
+if __name__ == '__main__':
+    print('Choose a config:')
+    print('1. 128 bit', '2. 192 bit', '3. 256 bit')
+    config_op = input('Enter your config: ')
 
-input_prompt = f'Enter your key({key_len} characters at most):'
-# key = input(input_prompt)
-key = 'Thats My Kung Fu'
+    # config_op = 1
+    config = [(16, 11), (24, 13), (32, 15)]
 
-start = time()
-w = key_scheduling(key, key_len)
-end = time()
+    key_len, total_rounds = config[int(config_op) - 1]
+    AES_modulus = BitVector(bitstring='100011011')
 
-# print('generated keys:')
-# for i in range(0, len(w), 4):
-#   print_matrix(w[i:i+4])
+    input_prompt = f'Enter your key({key_len} characters at most):'
+    key = input(input_prompt)
+    # key = 'Thats My Kung Fu'
 
-print('key scheduling:', end-start)
+    print('\nChoose an option:')
+    print('1.Text', '2.File')
+    op = input('Enter your option: ')
 
+    input_in_hex = None
+    filename = 'text.txt'
+    if int(op) == 1:
+        text = input('Enter you text: ')
+        input_in_hex = BitVector(textstring=text).get_bitvector_in_hex()
+    else:
+        filename = input('Enter File name:')
+        try:
+            with open(filename, 'rb') as f:
+                file_data = f.read()
+                input_in_hex = file_data.hex()
+        except IOError:
+            print('file open error', Exception)
 
-# text = input("Enter plain text:")
-# text = "Two One Nine Two"
-# input_in_hex = BitVector(textstring=text).get_bitvector_in_hex()
-# print('input_in_hex:', input_in_hex)
+    if input_in_hex is None:
+        print('wrong')
+    else:
+        # print(input_in_hex)
+        start = time()
+        w = key_scheduling(key, key_len)
+        end = time()
 
-f = open('difficult.jpg', 'rb')
-file_data = f.read()
-input_in_hex = file_data.hex()
-f.close()
+        # print('generated keys:')
+        # for i in range(0, len(w), 4):
+        #     print_matrix(w[i:i+4])
 
-blocks = make_matrix(input_in_hex, chunk_size)
+        print('key scheduling:', end - start, 'seconds\n')
 
+        blocks = make_matrix(input_in_hex, chunk_size=key_len * 2)
+        if int(op) == 1:
+            print('input_in_hex: ', matrix_to_hex_data(blocks), '\n')
 
-cypher_text = []
+        # Encryption Process
+        cypher_text = []
+        start = time()
+        for block in blocks:
+            cypher_text.append(encrypt(block))
+        end = time()
 
-start = time()
-for block in blocks:
-    cypher_text.append(encrypt(block))
-end = time()
+        try:
+            with open(filename + '.enc', 'w') as f:
+                f.write(matrix_to_hex_data(cypher_text))
+        except IOError:
+            print('file write error')
 
-# print('cypher text:', matrix_to_hex_data(cypher_text))
-print('encryption time:', end-start)
+        if int(op) == 1:
+            print('cypher text:', matrix_to_hex_data(cypher_text))
+        print('encryption time:', end - start, 'seconds\n')
 
-start = time()
-retrieved_text_in_hex = []
-for block in cypher_text:
-    retrieved_text_in_hex.append(decrypt(block))
+        # Decryption Process
+        try:
+            with open(filename + '.enc', 'rb') as f:
+                file_data = f.read()
+                input_in_hex = file_data.decode('utf_8')
+        except IOError:
+            print('file write error')
 
-retrieved_hex = matrix_to_hex_data(retrieved_text_in_hex)
-byte_from_hex = bytes.fromhex(retrieved_hex)
-end = time()
+        cypher_text = make_matrix(input_in_hex, chunk_size=key_len * 2)
 
-# print('retrieved text:', retrieved_hex)
-# print(byte_from_hex.decode('ASCII'))
-print('decryption time:', end-start)
+        start = time()
+        retrieved_text_in_hex = []
+        for block in cypher_text:
+            retrieved_text_in_hex.append(decrypt(block))
 
-f = open('decrypted.png', 'wb')
-f.write(byte_from_hex)
-f.close()
+        retrieved_hex = matrix_to_hex_data(retrieved_text_in_hex)
+        byte_from_hex = bytes.fromhex(retrieved_hex)
+        end = time()
+
+        if int(op) == 1:
+            print('retrieved text:', retrieved_hex)
+            print(byte_from_hex.decode('utf_8'))
+        else:
+            try:
+                with open('decrypted_' + filename, 'wb') as f:
+                    f.write(byte_from_hex)
+            except IOError:
+                print('file write error')
+
+        print('decryption time:', end - start, 'seconds\n')
