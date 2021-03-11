@@ -54,19 +54,20 @@ InvMixer = [
     [BitVector(hexstring="0B"), BitVector(hexstring="0D"), BitVector(hexstring="09"), BitVector(hexstring="0E")]
 ]
 
+AES_modulus = BitVector(bitstring='100011011')
+
 
 def ROTL8(x, shift):
     value = BitVector(intVal=x.intValue(), size=8)
     return value << shift
 
 
-def generate_sbox():
-    s = [0 for _ in range(256)]
+def generate_boxes():
+    s_box = [0 for _ in range(256)]
+    inv_sbox = [0 for _ in range(256)]
 
     p = BitVector(intVal=1, size=8)
     q = BitVector(intVal=1, size=8)
-
-    AES_modulus = BitVector(bitstring='100011011')
 
     while True:
         p = p.gf_multiply_modular(BitVector(intVal=0x03, size=8), AES_modulus, 8)
@@ -75,25 +76,15 @@ def generate_sbox():
 
         xformed = q ^ ROTL8(q, 1) ^ ROTL8(q, 2) ^ ROTL8(q, 3) ^ ROTL8(q, 4)
 
-        s[p.intValue()] = (xformed ^ BitVector(intVal=0x63, size=8)).intValue()
+        s_box[p.intValue()] = (xformed ^ BitVector(intVal=0x63, size=8)).intValue()
+        inv_sbox[s_box[p.intValue()]] = p.intValue()
 
         if p.intValue() == 1:
             break
 
-    s[0] = 0x63
-    return s
-
-
-def init():
-    sbox = generate_sbox()
-    inv_sbox = [0 for _ in range(len(sbox))]
-    for i in range(len(sbox)):
-        inv_sbox[sbox[i]] = i
-
-    return sbox, inv_sbox
-
-
-Sbox, InvSbox = init()
+    s_box[0] = 0x63
+    inv_sbox[0x63] = 0
+    return s_box, inv_sbox
 
 
 def make_matrix(data_in_hex, chunk_size):
@@ -102,10 +93,10 @@ def make_matrix(data_in_hex, chunk_size):
 
     blocks = []
     for chunk in chunks:
-        word_size = 8  # word contains 4 bytes
+        word_size = 8  # word contains 4 bytes, so total 4*2=8 Hex characters
         words = [(chunk[k:k + word_size]) for k in range(0, len(chunk), word_size)]
 
-        byte_size = 2  # byte contains 8 bits
+        byte_size = 2  # byte contains 8 bits, so 2 Hex characters
         result = []
         for word in words:
             result.append([BitVector(hexstring=(word[k:k + byte_size])) for k in range(0, len(word), byte_size)])
@@ -174,6 +165,30 @@ def byte_substitute_inverse(byte_value):
     return BitVector(intVal=s, size=8)
 
 
+def left_shift(state):
+    t = [BitVector(intVal=0, size=8) for _ in range(len(state))]
+    for i in range(len(state[0])):
+        for j in range(len(t)):
+            t[j] = state[j][i]
+        t = t[i:] + t[:i]
+        for j in range(len(t)):
+            state[j][i] = t[j]
+
+    return state
+
+
+def right_shift(state):
+    t = [BitVector(intVal=0, size=8) for _ in range(len(state))]
+    for i in range(len(state[0])):
+        for j in range(len(t)):
+            t[j] = state[j][i]
+        t = t[len(t)-i:] + t[:len(t)-i]
+        for j in range(len(t)):
+            state[j][i] = t[j]
+
+    return state
+
+
 def matrix_multiplication(mixer, state):
     rows, cols = (len(mixer[0]), len(state))
     result = [[BitVector(hexstring='00') for _ in range(rows)] for _ in range(cols)]
@@ -205,10 +220,7 @@ def encrypt(block):
         # print('byte sub:', print_matrix(state))
 
         # shift row
-        for i in range(1, len(state[0])):
-            for k in range(i):
-                for j in range(len(state) - 1):
-                    state[j][i], state[j + 1][i] = state[j + 1][i], state[j][i]
+        state = left_shift(state)
         # print(row shift', print_matrix(state))
 
         # mix columns
@@ -234,10 +246,7 @@ def decrypt(block):
     for r in range(total_rounds - 1, 0, -1):
 
         # inverse shift row
-        for i in range(1, len(state[0])):
-            for k in range(i):
-                for j in range(len(state) - 1, 0, -1):
-                    state[j][i], state[j - 1][i] = state[j - 1][i], state[j][i]
+        state = right_shift(state)
         # print('inverse shift row', print_matrix(state))
 
         # inverse byte substitute
@@ -260,23 +269,20 @@ def decrypt(block):
     return state
 
 
-def encryption(input_in_hex, key_len):
-    blocks = make_matrix(input_in_hex, chunk_size=key_len*2)
-
-    cypher_text_in_hex = []
+def encryption(blocks):
+    cipher_text_in_hex = []
     for block in blocks:
-        cypher_text_in_hex.append(encrypt(block))
-    return matrix_to_hex_data(cypher_text_in_hex)
+        cipher_text_in_hex.append(encrypt(block))
+
+    return matrix_to_hex_data_in_string(cipher_text_in_hex)
 
 
-def decryption(input_in_hex, key_len):
-    cypher_text_in_hex = make_matrix(input_in_hex, chunk_size=key_len*2)
-
+def decryption(blocks):
     retrieved_text_in_hex = []
-    for block in cypher_text_in_hex:
+    for block in blocks:
         retrieved_text_in_hex.append(decrypt(block))
 
-    return matrix_to_hex_data(retrieved_text_in_hex)
+    return matrix_to_hex_data_in_string(retrieved_text_in_hex)
 
 
 def print_matrix(block):
@@ -287,7 +293,7 @@ def print_matrix(block):
     return ''
 
 
-def matrix_to_hex_data(data_in_hex):
+def matrix_to_hex_data_in_string(data_in_hex):
     data = []
     for block in data_in_hex:
         for word in block:
@@ -296,79 +302,91 @@ def matrix_to_hex_data(data_in_hex):
     return ''.join(data)
 
 
-if __name__ == '__main__':
-    try:
-        print('Choose a config:')
-        print('1. 128 bit', '2. 192 bit', '3. 256 bit')
-        config_op = input('Enter your config: ')
+Sbox, InvSbox = generate_boxes()
+config = [(128, 16, 11), (192, 24, 13), (256, 32, 15)]
 
-        # config_op = 1
-        config = [(16, 11), (24, 13), (32, 15)]
+try:
+    '''
+    key = 'Thats My Kung Fu'
+    # data_in_hex = BitVector(textstring='Two Three Five Four Ten').get_bitvector_in_hex()
 
-        key_len, total_rounds = config[int(config_op) - 1]
-        AES_modulus = BitVector(bitstring='100011011')
+    filename = 'love.png'
+    with open(filename, 'rb') as f:
+        file_data = f.read()
+        data_in_hex = file_data.hex()
+    op = '2'
+    '''
 
-        input_prompt = f'Enter your key({key_len} characters at most):'
-        key = input(input_prompt)
-        # key = 'Thats My Kung Fu'
+    # input_prompt = f'Enter your key({key_len} characters at most):'
+    key = input('Enter your key: ')
 
-        print('\nChoose an option:')
-        print('1.Text', '2.File')
-        op = input('Enter your option: ')
+    print('\nChoose an option:')
+    print('1.Text', '2.File')
+    op = input('Enter your option: ')
 
-        input_in_hex = None
-        filename = 'text.txt'
-        if int(op) == 1:
-            text = input('Enter you text: ')
-            input_in_hex = BitVector(textstring=text).get_bitvector_in_hex()
-        else:
-            filename = input('Enter File name:')
-            with open(filename, 'rb') as f:
-                file_data = f.read()
-                input_in_hex = file_data.hex()
+    filename = 'text.txt'
+    if int(op) == 1:
+        text = input('Enter you text: ')
+        data_in_hex = BitVector(textstring=text).get_bitvector_in_hex()
+    else:
+        filename = input('Enter File name:')
+        with open(filename, 'rb') as f:
+            file_data = f.read()
+            data_in_hex = file_data.hex()
 
-        # print(input_in_hex)
+    for value in config:
+        config_mode, key_len, total_rounds = value
+
         start = time()
         w = key_scheduling(key, key_len)
         end = time()
 
+        key_scheduling_time = end - start
+
+        # print(print_matrix(w[0:4]))
         # print('generated keys:')
         # for i in range(0, len(w), 4):
-        #     print_matrix(w[i:i+4])
+        #    print_matrix(w[i:i+4])
 
-        print('key scheduling:', end - start, 'seconds\n')
         if int(op) == 1:
-            print('input_in_hex: ', input_in_hex, '\n')
+            print('data_in_hex: ', data_in_hex, '\n')
 
         # Encryption Process
         start = time()
-        cypher_text = encryption(input_in_hex, key_len)
+        cipher_text = encryption(make_matrix(data_in_hex, chunk_size=key_len*2))
         end = time()
 
-        with open(filename + '.enc', 'w') as f:
-            f.write(cypher_text)
+        encryption_time = end - start
+
+        with open(f'encrypted_{config_mode}_bits_' + filename, 'w') as f:
+            f.write(cipher_text)
 
         if int(op) == 1:
-            print('cypher text:', cypher_text)
-        print('encryption time:', end - start, 'seconds\n')
+            print('cipher text:', cipher_text, '[IN HEX]')
 
         # Decryption Process
-        with open(filename + '.enc', 'rb') as f:
+        with open(f'encrypted_{config_mode}_bits_' + filename, 'rb') as f:
             file_data = f.read()
-            input_in_hex = file_data.decode('utf_8')
+            file_data_in_hex = file_data.decode()
 
         start = time()
-        retrieved_hex = decryption(input_in_hex, key_len)
+        retrieved_hex = decryption(make_matrix(file_data_in_hex, chunk_size=key_len*2))
         end = time()
 
-        with open('decrypted_' + filename, 'wb') as f:
+        decryption_time = end - start
+
+        with open(f'{config_mode}_bits_decrypted_' + filename, 'wb') as f:
             f.write(bytes.fromhex(retrieved_hex))
 
         if int(op) == 1:
-            print('retrieved text:', retrieved_hex)
-            print(bytes.fromhex(retrieved_hex).decode('utf_8'))
+            print('\ndeciphered text:')
+            print(retrieved_hex, '[IN HEX]')
+            print(bytes.fromhex(retrieved_hex).decode(), '[IN ASCII]')
 
-        print('decryption time:', end - start, 'seconds\n')
+        print('\nExecution Time:', f'[{config_mode} bits]')
+        print('key_scheduling_time:', key_scheduling_time, 'seconds')
+        print('encryption_time:', encryption_time, 'seconds')
+        print('decryption_time:', decryption_time, 'seconds\n')
 
-    except Exception as e:
-        print(str(e))
+except Exception as e:
+    print(str(e))
